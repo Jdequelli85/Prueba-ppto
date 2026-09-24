@@ -451,6 +451,21 @@ th{font-size:12px;text-transform:uppercase;color:#666;background:#fafafa}
 
 <script>
 const API_URL = "https://script.google.com/macros/s/AKfycby_3DebaIbZZW2qZ7ShkePBD40Bzo8wGyaHAw8w0omsKahF6CpuUEEPaG2ox3fGkAqk0w/exec";
+
+// PRUEBA 7: si Histórico devuelve PPTO con la sesión en el fragmento,
+// restauramos la sesión ANTES de renderizar la aplicación.
+(function restaurarSesionDesdeFragmento(){
+  try{
+    const hash = new URLSearchParams(location.hash.replace(/^#/, ""));
+    const t = hash.get("gt_session") || "";
+    const u = hash.get("gt_usuario") || "";
+    if(t){
+      sessionStorage.setItem("gt_token", t);
+      if(u) sessionStorage.setItem("gt_usuario", u);
+      history.replaceState(null, "", location.pathname + location.search);
+    }
+  }catch(e){}
+})();
 const LOGO_URL = "https://raw.githubusercontent.com/Jdequelli85/qr-corralon/main/logo.png";
 
 /*
@@ -1921,15 +1936,17 @@ function cerrarGestion(){
 window.addEventListener("message",function(event){
   const frame=$("gestionFrame");
   if(!frame || event.source!==frame.contentWindow) return;
-  // VER dentro de Gestión: cargar en esta misma página, sin navegación
-  // ni recarga, conservando el token de PPTO en memoria.
+  // VER dentro de Gestión: Histórico devuelve a PPTO en el mismo
+  // contexto de navegación y pasa la sesión en el fragmento (#).
+  // El fragmento no se envía al servidor y PPTO lo consume al cargar.
   if(event.origin===GESTION_ORIGIN && event.data?.type==="GT_VER_PRESUPUESTO"){
     const numero=String(event.data.numero||"").trim();
     if(!numero || !token) return;
-    cerrarGestion();
-    verNumero=numero;
-    renderLoadingHistorico();
-    cargarHistorico(numero);
+    const url = "https://ppto.gytsrl.com/?ver=" +
+      encodeURIComponent(numero) +
+      "#gt_session=" + encodeURIComponent(token) +
+      "&gt_usuario=" + encodeURIComponent(vendedor);
+    window.location.href = url;
     return;
   }
   if(event.data?.type!=="GT_GESTION_READY") return;
