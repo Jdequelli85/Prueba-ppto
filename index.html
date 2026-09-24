@@ -1912,9 +1912,19 @@ function cerrarGestion(){
 }
 
 window.addEventListener("message",function(event){
-  if(event.origin!==GESTION_ORIGIN) return;
-  if(event.source!==$("gestionFrame")?.contentWindow) return;
-  if(event.data?.type==="GT_GESTION_READY") enviarSesionGestion();
+  const frame=$("gestionFrame");
+  if(!frame || event.source!==frame.contentWindow) return;
+  if(event.data?.type!=="GT_GESTION_READY") return;
+
+  // El Histórico nos avisa cuando ya está listo para recibir la sesión.
+  // Respondemos al origen real desde el que llegó el mensaje, por si
+  // historico.gytsrl.com redirige internamente a otro origen.
+  if(!event.origin) return;
+  frame.contentWindow.postMessage({
+    type:"GT_GESTION_SESSION",
+    token:token,
+    usuario:vendedor
+  },event.origin);
 });
 
 document.addEventListener("click",function(event){
