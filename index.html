@@ -1874,11 +1874,15 @@ const GESTION_ORIGIN = new URL(GESTION_URL).origin;
 function enviarSesionGestion(){
   const frame=$("gestionFrame");
   if(!frame || !frame.contentWindow || !token) return;
+  // Para esta prueba usamos '*' como destino.
+  // Gestión valida que el mensaje provenga realmente de PPTO
+  // (event.origin === https://ppto.gytsrl.com), por lo que no
+  // se expone la sesión a otro origen.
   frame.contentWindow.postMessage({
     type:"GT_GESTION_SESSION",
     token:token,
     usuario:vendedor
-  },GESTION_ORIGIN);
+  },"*");
 }
 
 function abrirGestion(){
@@ -1887,8 +1891,14 @@ function abrirGestion(){
   const frame=$("gestionFrame");
   $("gestionBackdrop").classList.add("open");
 
-  // El listener de carga se coloca ANTES de asignar src para no perder
-  // la primera carga del Histórico.
+  // PRUEBA 4: además del postMessage, enviamos la sesión en el
+  // fragmento (#) de la URL. El fragmento NO se envía al servidor.
+  // Esto nos permite comprobar si el problema está exclusivamente
+  // en la comunicación postMessage entre ambos dominios.
+  const hash = "#gt_session=" + encodeURIComponent(token) +
+               "&gt_usuario=" + encodeURIComponent(vendedor);
+  const urlSesion = GESTION_URL + hash;
+
   if(frame.dataset.listenerAttached!=="1"){
     frame.addEventListener("load",function(){
       enviarSesionGestion();
@@ -1897,13 +1907,9 @@ function abrirGestion(){
     frame.dataset.listenerAttached="1";
   }
 
-  if(!frame.src || frame.src==="about:blank"){
-    frame.src=GESTION_URL;
-  }else{
-    enviarSesionGestion();
-  }
+  frame.src = urlSesion;
 
-  // Segundo intento por si el Histórico ya terminó de cargar.
+  // También intentamos por postMessage como vía secundaria.
   setTimeout(enviarSesionGestion,500);
 }
 
@@ -1917,14 +1923,14 @@ window.addEventListener("message",function(event){
   if(event.data?.type!=="GT_GESTION_READY") return;
 
   // El Histórico nos avisa cuando ya está listo para recibir la sesión.
-  // Respondemos al origen real desde el que llegó el mensaje, por si
-  // historico.gytsrl.com redirige internamente a otro origen.
-  if(!event.origin) return;
+  // En esta prueba respondemos con '*' para eliminar cualquier
+  // problema de destino-origin durante la carga/redirección.
+  if(!token) return;
   frame.contentWindow.postMessage({
     type:"GT_GESTION_SESSION",
     token:token,
     usuario:vendedor
-  },event.origin);
+  },"*");
 });
 
 document.addEventListener("click",function(event){
