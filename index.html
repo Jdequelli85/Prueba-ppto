@@ -443,6 +443,19 @@ th{font-size:12px;text-transform:uppercase;color:#666;background:#fafafa}
 #gestionFrame{width:100%;height:100%;border:0;background:#f3f4f6;display:block}
 @media(max-width:700px){.gestion-backdrop{padding:0}.gestion-modal{border-radius:0}.gestion-modal-head{height:48px;flex-basis:48px}}
 
+
+/* =========================================================
+   PRUEBA 8 — PRESUPUESTO DENTRO DE PPTO
+   ========================================================= */
+.presupuesto-ver-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.62);z-index:9500;display:none;padding:18px}
+.presupuesto-ver-backdrop.open{display:flex;align-items:stretch;justify-content:center}
+.presupuesto-ver-modal{width:min(1500px,100%);height:100%;background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.38);display:flex;flex-direction:column}
+.presupuesto-ver-head{height:54px;flex:0 0 54px;display:flex;align-items:center;justify-content:space-between;padding:0 14px 0 18px;border-bottom:1px solid #ddd;background:#fff;gap:10px}
+.presupuesto-ver-head strong{font-size:17px}
+.presupuesto-ver-actions{display:flex;align-items:center;gap:8px}
+.presupuesto-ver-close{border:0;background:#eee;border-radius:50%;width:34px;height:34px;font-size:22px;line-height:1}
+#presupuestoVerFrame{width:100%;height:100%;border:0;background:#f3f4f6;display:block}
+@media(max-width:700px){.presupuesto-ver-backdrop{padding:0}.presupuesto-ver-modal{border-radius:0}.presupuesto-ver-head{height:48px;flex-basis:48px;padding:0 10px 0 12px}.presupuesto-ver-head strong{font-size:14px}}
 </style>
 </head>
 <body>
@@ -479,8 +492,18 @@ const CATALOGO_CACHE_KEY = "gt_catalogo_cache_v1";
 const CATALOGO_CACHE_MAX_AGE = 24 * 60 * 60 * 1000; // 24 horas
 
 
-let token = sessionStorage.getItem("gt_token") || "";
-let vendedor = sessionStorage.getItem("gt_usuario") || "";
+const gtHashParams = new URLSearchParams(String(location.hash || "").replace(/^#/, ""));
+const gtHashToken = gtHashParams.get("gt_session") || "";
+const gtHashUsuario = gtHashParams.get("gt_usuario") || "";
+let token = sessionStorage.getItem("gt_token") || gtHashToken;
+let vendedor = sessionStorage.getItem("gt_usuario") || gtHashUsuario;
+if(gtHashToken){
+  try{ sessionStorage.setItem("gt_token", gtHashToken); }catch(e){}
+  if(gtHashUsuario){ try{ sessionStorage.setItem("gt_usuario", gtHashUsuario); }catch(e){} }
+  // El fragmento solo sirve para entregar la sesión al iframe.
+  // Lo quitamos de la barra de dirección del iframe una vez leído.
+  try{ history.replaceState(null, "", location.pathname + location.search); }catch(e){}
+}
 let productos = [];
 let catalogoProductos = [];
 let catalogoOpciones = [];
@@ -1933,20 +1956,41 @@ function cerrarGestion(){
   $("gestionBackdrop").classList.remove("open");
 }
 
+function abrirPresupuestoEnVentana(numero){
+  const modal=$("presupuestoVerBackdrop");
+  const frame=$("presupuestoVerFrame");
+  if(!modal || !frame || !numero || !token) return;
+
+  modal.classList.add("open");
+  const url = "https://ppto.gytsrl.com/?ver=" +
+    encodeURIComponent(String(numero)) +
+    "#gt_session=" + encodeURIComponent(token) +
+    "&gt_usuario=" + encodeURIComponent(vendedor);
+  frame.src=url;
+}
+
+function cerrarPresupuestoEnVentana(){
+  const modal=$("presupuestoVerBackdrop");
+  const frame=$("presupuestoVerFrame");
+  if(modal) modal.classList.remove("open");
+  if(frame) frame.src="about:blank";
+}
+
+function volverGestionDesdePresupuesto(){
+  cerrarPresupuestoEnVentana();
+  abrirGestion();
+}
+
 window.addEventListener("message",function(event){
   const frame=$("gestionFrame");
   if(!frame || event.source!==frame.contentWindow) return;
-  // VER dentro de Gestión: Histórico devuelve a PPTO en el mismo
-  // contexto de navegación y pasa la sesión en el fragmento (#).
-  // El fragmento no se envía al servidor y PPTO lo consume al cargar.
+  // VER dentro de Gestión: abrimos el presupuesto en un iframe
+  // dentro de PPTO. No navegamos ni recargamos la página principal.
   if(event.origin===GESTION_ORIGIN && event.data?.type==="GT_VER_PRESUPUESTO"){
     const numero=String(event.data.numero||"").trim();
     if(!numero || !token) return;
-    const url = "https://ppto.gytsrl.com/?ver=" +
-      encodeURIComponent(numero) +
-      "#gt_session=" + encodeURIComponent(token) +
-      "&gt_usuario=" + encodeURIComponent(vendedor);
-    window.location.href = url;
+    cerrarGestion();
+    abrirPresupuestoEnVentana(numero);
     return;
   }
   if(event.data?.type!=="GT_GESTION_READY") return;
@@ -1965,10 +2009,18 @@ window.addEventListener("message",function(event){
 document.addEventListener("click",function(event){
   if(event.target.id==="openGestion") abrirGestion();
   if(event.target.id==="closeGestion" || event.target.id==="gestionBackdrop") cerrarGestion();
+  if(event.target.id==="closePresupuestoVer") cerrarPresupuestoEnVentana();
+  if(event.target.id==="volverGestionPresupuesto") volverGestionDesdePresupuesto();
+  if(event.target.id==="presupuestoVerBackdrop") cerrarPresupuestoEnVentana();
 });
 
 document.addEventListener("keydown",function(event){
-  if(event.key==="Escape" && $("gestionBackdrop")?.classList.contains("open")) cerrarGestion();
+  if(event.key!=="Escape") return;
+  if($("presupuestoVerBackdrop")?.classList.contains("open")){
+    cerrarPresupuestoEnVentana();
+    return;
+  }
+  if($("gestionBackdrop")?.classList.contains("open")) cerrarGestion();
 });
 
 if(token) renderApp(); else mostrarLogin();
@@ -1983,6 +2035,19 @@ if(token) renderApp(); else mostrarLogin();
         <button type="button" class="gestion-close" id="closeGestion" aria-label="Cerrar">×</button>
       </div>
       <iframe id="gestionFrame" title="Gestión de presupuestos" src="about:blank"></iframe>
+    </div>
+  </div>
+
+  <div class="presupuesto-ver-backdrop" id="presupuestoVerBackdrop">
+    <div class="presupuesto-ver-modal" role="dialog" aria-modal="true" aria-label="Presupuesto seleccionado">
+      <div class="presupuesto-ver-head">
+        <strong>👁 PRESUPUESTO</strong>
+        <div class="presupuesto-ver-actions">
+          <button type="button" class="btn btn-secondary" id="volverGestionPresupuesto">↩ VOLVER A GESTIÓN</button>
+          <button type="button" class="presupuesto-ver-close" id="closePresupuestoVer" aria-label="Cerrar">×</button>
+        </div>
+      </div>
+      <iframe id="presupuestoVerFrame" title="Presupuesto seleccionado" src="about:blank"></iframe>
     </div>
   </div>
 
