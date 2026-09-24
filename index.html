@@ -60,6 +60,10 @@ input:focus,select:focus{border-color:var(--rojo);box-shadow:0 0 0 3px rgba(190,
 .status.ok{display:block;background:#edf8f0;color:var(--verde);border:1px solid #b9dfc2}
 .titlebar{display:flex;align-items:center;justify-content:space-between;gap:15px;margin-bottom:14px}
 .add-btn{white-space:nowrap}
+.productos-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.productos-toolbar-left{display:flex;align-items:center;gap:8px}
+.productos-toolbar-right{display:flex;align-items:center}
+@media(max-width:560px){.productos-toolbar{flex-wrap:wrap}.productos-toolbar-left,.productos-toolbar-right{width:100%}.productos-toolbar-right .add-btn{width:100%}}
 .empty{padding:28px;text-align:center;color:#777;border:1px dashed #ccc;border-radius:10px}
 .table-wrap{overflow:auto}
 table{width:100%;border-collapse:collapse;min-width:760px}
@@ -430,7 +434,6 @@ th{font-size:12px;text-transform:uppercase;color:#666;background:#fafafa}
 /* =====================================================
    PRUEBA 1 — GESTIÓN INTEGRADA
    ===================================================== */
-.gestion-btn{margin-left:8px}
 .gestion-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.58);z-index:9000;display:none;padding:18px}
 .gestion-backdrop.open{display:flex;align-items:stretch;justify-content:center}
 .gestion-modal{width:min(1500px,100%);height:100%;background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.35);display:flex;flex-direction:column}
@@ -773,10 +776,7 @@ function mostrarLogin(mensaje=""){
 function header(){
   return `<header><div class="header-inner">
     <img src="${LOGO_URL}" alt="G&T S.R.L.">
-    <div style="display:flex;align-items:center;gap:8px">
-      <div class="user-pill">Vendedor: <strong>${esc(vendedor)}</strong></div>
-      <button type="button" class="btn btn-secondary gestion-btn" id="openGestion">📋 GESTIÓN</button>
-    </div>
+    <div class="user-pill">Vendedor: <strong>${esc(vendedor)}</strong></div>
   </div></header>`;
 }
 
@@ -824,10 +824,12 @@ async function renderApp(){
     </section>
 
     <section class="card">
-      <div class="titlebar">
-        <h2>Productos</h2>
-        <div class="productos-actions">
+      <div class="titlebar productos-toolbar">
+        <div class="productos-toolbar-left">
           <button class="btn btn-secondary catalogo-consulta-btn" id="openConsultaCatalogo">📦 CATÁLOGO</button>
+          <button class="btn btn-secondary" id="openGestion">📋 GESTIÓN</button>
+        </div>
+        <div class="productos-toolbar-right">
           <button class="btn btn-primary add-btn" id="add">＋ AGREGAR PRODUCTO</button>
         </div>
       </div>
@@ -1881,14 +1883,28 @@ function enviarSesionGestion(){
 
 function abrirGestion(){
   if(!token){ mostrarLogin(); return; }
-  $("gestionBackdrop").classList.add("open");
+
   const frame=$("gestionFrame");
-  if(frame.src!==GESTION_URL) frame.src=GESTION_URL;
+  $("gestionBackdrop").classList.add("open");
+
+  // El listener de carga se coloca ANTES de asignar src para no perder
+  // la primera carga del Histórico.
   if(frame.dataset.listenerAttached!=="1"){
-    frame.addEventListener("load",enviarSesionGestion);
+    frame.addEventListener("load",function(){
+      enviarSesionGestion();
+      setTimeout(enviarSesionGestion,250);
+    });
     frame.dataset.listenerAttached="1";
   }
-  setTimeout(enviarSesionGestion,150);
+
+  if(!frame.src || frame.src==="about:blank"){
+    frame.src=GESTION_URL;
+  }else{
+    enviarSesionGestion();
+  }
+
+  // Segundo intento por si el Histórico ya terminó de cargar.
+  setTimeout(enviarSesionGestion,500);
 }
 
 function cerrarGestion(){
