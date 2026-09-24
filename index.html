@@ -1962,11 +1962,42 @@ function abrirPresupuestoEnVentana(numero){
   if(!modal || !frame || !numero || !token) return;
 
   modal.classList.add("open");
+
+  // V9: entregamos la sesión al visor mediante fragmento.
+  // El fragmento no viaja al servidor y el PPTO que se carga
+  // dentro del iframe lo consume antes de renderizar el login.
+  const hash = "#gt_session=" + encodeURIComponent(token) +
+               "&gt_usuario=" + encodeURIComponent(vendedor) +
+               "&gt_origen=gestion";
+
   const url = "https://ppto.gytsrl.com/?ver=" +
     encodeURIComponent(String(numero)) +
-    "#gt_session=" + encodeURIComponent(token) +
-    "&gt_usuario=" + encodeURIComponent(vendedor);
-  frame.src=url;
+    hash;
+
+  // V9: además del fragmento, enviamos la sesión por postMessage
+  // al PPTO que se ejecuta dentro del iframe. Así el primer VER
+  // puede autenticarse aunque el navegador no conserve el fragmento.
+  function enviarSesionVisor(){
+    try{
+      if(frame.contentWindow){
+        frame.contentWindow.postMessage({
+          type:"GT_VISOR_SESSION",
+          token:token,
+          usuario:vendedor
+        },"https://ppto.gytsrl.com");
+      }
+    }catch(e){}
+  }
+
+  frame.addEventListener("load", enviarSesionVisor, {once:true});
+
+  // Limpiamos primero el iframe anterior para evitar que un
+  // navegador reutilice una navegación anterior.
+  frame.src="about:blank";
+  setTimeout(function(){
+    frame.src=url;
+    setTimeout(enviarSesionVisor,300);
+  },20);
 }
 
 function cerrarPresupuestoEnVentana(){
@@ -2021,6 +2052,27 @@ document.addEventListener("keydown",function(event){
     return;
   }
   if($("gestionBackdrop")?.classList.contains("open")) cerrarGestion();
+});
+
+// V9: respaldo para el visor cuando este PPTO se ejecuta dentro de un iframe.
+window.addEventListener("message", function(event){
+  if(event.source !== window.parent) return;
+  if(event.origin !== "https://ppto.gytsrl.com") return;
+  const data = event.data || {};
+  if(data.type !== "GT_VISOR_SESSION") return;
+  if(!data.token || !data.usuario) return;
+
+  token = String(data.token);
+  vendedor = String(data.usuario);
+  try{ sessionStorage.setItem("gt_token", token); }catch(e){}
+  try{ sessionStorage.setItem("gt_usuario", vendedor); }catch(e){}
+
+  if(verNumero){
+    renderLoadingHistorico();
+    cargarHistorico(verNumero);
+  }else{
+    renderApp();
+  }
 });
 
 if(token) renderApp(); else mostrarLogin();
