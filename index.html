@@ -1979,8 +1979,34 @@ function abrirPresupuestoEnVentana(numero){
               encodeURIComponent(String(numero).trim()) +
               "&gt_viewer=1" + hash;
 
+  // V12: el visor puede necesitar unos instantes para inicializarse.
+  // Enviamos la sesión cuando el iframe terminó de cargar y repetimos
+  // una vez como respaldo para evitar la condición de carrera.
+  if(frame.dataset.viewerListenerAttached!=="1") {
+    frame.addEventListener("load", function(){
+      enviarSesionVisor(frame);
+      setTimeout(function(){ enviarSesionVisor(frame); }, 150);
+      setTimeout(function(){ enviarSesionVisor(frame); }, 500);
+    });
+    frame.dataset.viewerListenerAttached="1";
+  }
+
   frame.src = url;
   backdrop.classList.add("open");
+
+  // También intentamos inmediatamente por si el iframe ya estaba cargado.
+  setTimeout(function(){ enviarSesionVisor(frame); }, 250);
+}
+
+function enviarSesionVisor(frame){
+  if(!frame || !frame.contentWindow || !token) return;
+  try{
+    frame.contentWindow.postMessage({
+      type:"GT_VIEWER_SESSION",
+      token:token,
+      usuario:vendedor
+    }, location.origin);
+  }catch(e){}
 }
 
 function cerrarPresupuestoEnVentana(){
@@ -2045,10 +2071,69 @@ document.addEventListener("keydown",function(event){
   if($("gestionBackdrop")?.classList.contains("open")) cerrarGestion();
 });
 
-// V11: el visor PPTO se abre en un iframe independiente.
+// V12: el visor PPTO se abre en un iframe independiente.
 // La página principal conserva su sesión y su estado intactos.
+//
+// IMPORTANTE: si este documento está funcionando como visor, NO mostramos
+// el login inmediatamente. Esperamos primero la sesión enviada por el
+// PPTO principal. Esto evita la condición de carrera que hacía que el
+// primer VER pidiera usuario/PIN y los siguientes no.
+let gtViewerSessionTimer = null;
 
-if(token) renderApp(); else mostrarLogin();
+function mostrarEsperaSesionVisor(){
+  $("app").innerHTML = `
+    <main class="wrap">
+      <section class="card login-card" style="text-align:center">
+        <img class="logo-login" src="${LOGO_URL}" alt="G&T S.R.L.">
+        <h1>Cargando presupuesto...</h1>
+        <div class="subtitle">Verificando la sesión actual.</div>
+        <div class="catalog-spinner" aria-label="Cargando"></div>
+      </section>
+    </main>`;
+}
+
+if(gtViewer){
+  if(token){
+    renderApp();
+  }else{
+    mostrarEsperaSesionVisor();
+    gtViewerSessionTimer=setTimeout(function(){
+      // Si después de la espera no llegó una sesión, recién entonces
+      // permitimos el login manual como respaldo.
+      if(!token) mostrarLogin();
+    }, 5000);
+  }
+}else{
+  if(token) renderApp(); else mostrarLogin();
+}
+
+window.addEventListener("message", function(event){
+  if(!gtViewer) return;
+  if(event.origin !== location.origin) return;
+  if(event.source !== window.parent) return;
+
+  const data=event.data || {};
+  if(data.type !== "GT_VIEWER_SESSION") return;
+  if(!data.token) return;
+
+  token=String(data.token);
+  vendedor=String(data.usuario || "");
+
+  try{ sessionStorage.setItem("gt_token", token); }catch(e){}
+  try{ if(vendedor) sessionStorage.setItem("gt_usuario", vendedor); }catch(e){}
+
+  if(gtViewerSessionTimer){
+    clearTimeout(gtViewerSessionTimer);
+    gtViewerSessionTimer=null;
+  }
+
+  if(verNumero){
+    renderLoadingHistorico();
+    cargarHistorico(verNumero);
+  }else{
+    renderApp();
+  }
+});
 </script>
 
 
