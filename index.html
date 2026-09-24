@@ -1957,58 +1957,24 @@ function cerrarGestion(){
 }
 
 function abrirPresupuestoEnVentana(numero){
-  const modal=$("presupuestoVerBackdrop");
-  const frame=$("presupuestoVerFrame");
-  if(!modal || !frame || !numero || !token) return;
+  if(!numero || !token) return;
 
-  modal.classList.add("open");
-
-  // V9: entregamos la sesión al visor mediante fragmento.
-  // El fragmento no viaja al servidor y el PPTO que se carga
-  // dentro del iframe lo consume antes de renderizar el login.
-  const hash = "#gt_session=" + encodeURIComponent(token) +
-               "&gt_usuario=" + encodeURIComponent(vendedor) +
-               "&gt_origen=gestion";
-
-  const url = "https://ppto.gytsrl.com/?ver=" +
-    encodeURIComponent(String(numero)) +
-    hash;
-
-  // V9: además del fragmento, enviamos la sesión por postMessage
-  // al PPTO que se ejecuta dentro del iframe. Así el primer VER
-  // puede autenticarse aunque el navegador no conserve el fragmento.
-  function enviarSesionVisor(){
-    try{
-      if(frame.contentWindow){
-        frame.contentWindow.postMessage({
-          type:"GT_VISOR_SESSION",
-          token:token,
-          usuario:vendedor
-        },"https://ppto.gytsrl.com");
-      }
-    }catch(e){}
-  }
-
-  frame.addEventListener("load", enviarSesionVisor, {once:true});
-
-  // Limpiamos primero el iframe anterior para evitar que un
-  // navegador reutilice una navegación anterior.
-  frame.src="about:blank";
-  setTimeout(function(){
-    frame.src=url;
-    setTimeout(enviarSesionVisor,300);
-  },20);
+  // V10: NO abrimos otro PPTO dentro de un iframe.
+  // El presupuesto se carga directamente en ESTA misma aplicación,
+  // usando el token que ya tiene la sesión principal.
+  // De esta manera no existe un segundo login ni una segunda sesión.
+  cerrarGestion();
+  verNumero=String(numero).trim();
+  renderLoadingHistorico();
+  cargarHistorico(verNumero);
 }
 
 function cerrarPresupuestoEnVentana(){
-  const modal=$("presupuestoVerBackdrop");
-  const frame=$("presupuestoVerFrame");
-  if(modal) modal.classList.remove("open");
-  if(frame) frame.src="about:blank";
+  // Se conserva la función por compatibilidad con los controles
+  // existentes de versiones anteriores. En V10 no hay iframe de visor.
 }
 
 function volverGestionDesdePresupuesto(){
-  cerrarPresupuestoEnVentana();
   abrirGestion();
 }
 
@@ -2054,32 +2020,15 @@ document.addEventListener("keydown",function(event){
   if($("gestionBackdrop")?.classList.contains("open")) cerrarGestion();
 });
 
-// V9: respaldo para el visor cuando este PPTO se ejecuta dentro de un iframe.
-window.addEventListener("message", function(event){
-  if(event.source !== window.parent) return;
-  if(event.origin !== "https://ppto.gytsrl.com") return;
-  const data = event.data || {};
-  if(data.type !== "GT_VISOR_SESSION") return;
-  if(!data.token || !data.usuario) return;
-
-  token = String(data.token);
-  vendedor = String(data.usuario);
-  try{ sessionStorage.setItem("gt_token", token); }catch(e){}
-  try{ sessionStorage.setItem("gt_usuario", vendedor); }catch(e){}
-
-  if(verNumero){
-    renderLoadingHistorico();
-    cargarHistorico(verNumero);
-  }else{
-    renderApp();
-  }
-});
+// V10: no existe un visor PPTO secundario.
+// El evento GT_VER_PRESUPUESTO se resuelve directamente
+// en la ventana principal mediante abrirPresupuestoEnVentana().
 
 if(token) renderApp(); else mostrarLogin();
 </script>
 
 
-  <!-- PRUEBA 1: Gestión integrada -->
+  <!-- V10: Gestión integrada -->
   <div class="gestion-backdrop" id="gestionBackdrop">
     <div class="gestion-modal" role="dialog" aria-modal="true" aria-label="Gestión de presupuestos">
       <div class="gestion-modal-head">
@@ -2090,18 +2039,6 @@ if(token) renderApp(); else mostrarLogin();
     </div>
   </div>
 
-  <div class="presupuesto-ver-backdrop" id="presupuestoVerBackdrop">
-    <div class="presupuesto-ver-modal" role="dialog" aria-modal="true" aria-label="Presupuesto seleccionado">
-      <div class="presupuesto-ver-head">
-        <strong>👁 PRESUPUESTO</strong>
-        <div class="presupuesto-ver-actions">
-          <button type="button" class="btn btn-secondary" id="volverGestionPresupuesto">↩ VOLVER A GESTIÓN</button>
-          <button type="button" class="presupuesto-ver-close" id="closePresupuestoVer" aria-label="Cerrar">×</button>
-        </div>
-      </div>
-      <iframe id="presupuestoVerFrame" title="Presupuesto seleccionado" src="about:blank"></iframe>
-    </div>
-  </div>
 
 </body>
 </html>
