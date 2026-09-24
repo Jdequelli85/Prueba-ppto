@@ -1966,54 +1966,86 @@ function cerrarGestion(){
 function abrirPresupuestoEnVentana(numero){
   if(!numero || !token) return;
 
-  const frame=$("presupuestoVerFrame");
   const backdrop=$("presupuestoVerBackdrop");
-  if(!frame || !backdrop) return;
+  const contenido=$("presupuestoVerContenido");
+  if(!backdrop || !contenido) return;
 
   cerrarGestion();
-
-  const hash = "#gt_session=" + encodeURIComponent(token) +
-               "&gt_usuario=" + encodeURIComponent(vendedor);
-
-  const url = "https://ppto.gytsrl.com/?ver=" +
-              encodeURIComponent(String(numero).trim()) +
-              "&gt_viewer=1" + hash;
-
-  // V12: el visor puede necesitar unos instantes para inicializarse.
-  // Enviamos la sesión cuando el iframe terminó de cargar y repetimos
-  // una vez como respaldo para evitar la condición de carrera.
-  if(frame.dataset.viewerListenerAttached!=="1") {
-    frame.addEventListener("load", function(){
-      enviarSesionVisor(frame);
-      setTimeout(function(){ enviarSesionVisor(frame); }, 150);
-      setTimeout(function(){ enviarSesionVisor(frame); }, 500);
-    });
-    frame.dataset.viewerListenerAttached="1";
-  }
-
-  frame.src = url;
   backdrop.classList.add("open");
+  contenido.innerHTML = `<div class="loading" style="padding:60px">Cargando presupuesto ${esc(numero)}...</div>`;
 
-  // También intentamos inmediatamente por si el iframe ya estaba cargado.
-  setTimeout(function(){ enviarSesionVisor(frame); }, 250);
+  // V13: NO abrimos otro PPTO dentro de un iframe.
+  // El PPTO principal ya tiene la sesión válida, por lo que consulta
+  // directamente el presupuesto y lo renderiza dentro de este modal.
+  cargarPresupuestoEnModal(numero);
 }
 
-function enviarSesionVisor(frame){
-  if(!frame || !frame.contentWindow || !token) return;
+async function cargarPresupuestoEnModal(numero){
+  const contenido=$("presupuestoVerContenido");
+  if(!contenido) return;
+
   try{
-    frame.contentWindow.postMessage({
-      type:"GT_VIEWER_SESSION",
-      token:token,
-      usuario:vendedor
-    }, location.origin);
-  }catch(e){}
+    const r=await jsonp({accion:"presupuesto",numero,token});
+    if(!r?.ok) throw new Error(r?.error || "No se pudo cargar el presupuesto.");
+
+    const p=r.presupuesto || {};
+    const productosHistoricos=(r.productos||[]).map(x=>{
+      const id=String(x["ID Producto"]||x["ID"]||"").trim();
+      const idUpper=id.toUpperCase();
+      const cantidadComercialRaw=x["Cantidad comercial"];
+      const cantidadRaw=(cantidadComercialRaw!==undefined && cantidadComercialRaw!==null && String(cantidadComercialRaw).trim()!=="")
+        ? cantidadComercialRaw
+        : x["Cantidad"];
+      let unidad=String(x["Unidad"]||"").trim();
+      if(!unidad && idUpper.startsWith("ENV-")) unidad="Flete";
+      if(!unidad && idUpper.startsWith("CRRL-")) unidad="Unidades";
+      return {
+        id,
+        producto:x["Producto"]||"",
+        color:x["Color"]||"",
+        medida:x["Medida"]||"",
+        unidad,
+        cantidad:Number(cantidadRaw||0),
+        fechaEntrega:x["Fecha entrega"]||"",
+        m2Solicitados:Number(x["m² solicitados"]||x["m² Solicitados"]||x["m2 Solicitados"]||0),
+        cajas:Number(x["Cajas"]||0),
+        precioM2:Number(x["Precio/m²"]||0),
+        precioCaja:Number(x["Precio/caja"]||0),
+        subtotal:Number(x["Subtotal"]||0),
+        conZocalo:String(x["Con zócalo"]||"")==="Sí",
+        tieneOferta:Number(x["Oferta"]||0)>0
+      };
+    });
+
+    const datos={
+      cliente:p["Cliente"]||"",
+      dniCuit:p["DNI/CUIT"]||"",
+      telefono:p["Teléfono"]||"",
+      email:p["Email"]||"",
+      direccion:p["Dirección"]||"",
+      formaPago:p["Forma de pago"]||"",
+      total:Number(p["Total"]||0),
+      productos:productosHistoricos
+    };
+
+    const fecha=p["Fecha"]
+      ? new Date(p["Fecha"]).toLocaleDateString("es-AR")
+      : new Date().toLocaleDateString("es-AR");
+
+    contenido.innerHTML = quoteHtml(numero,fecha,datos);
+  }catch(e){
+    contenido.innerHTML = `
+      <section class="card" style="margin:20px">
+        <div class="status error" style="display:block">${esc(e.message)}</div>
+      </section>`;
+  }
 }
 
 function cerrarPresupuestoEnVentana(){
   const backdrop=$("presupuestoVerBackdrop");
-  const frame=$("presupuestoVerFrame");
+  const contenido=$("presupuestoVerContenido");
   if(backdrop) backdrop.classList.remove("open");
-  if(frame) frame.src="about:blank";
+  if(contenido) contenido.innerHTML="";
 }
 
 function volverGestionDesdePresupuesto(){
@@ -2023,13 +2055,6 @@ function volverGestionDesdePresupuesto(){
 
 window.addEventListener("message",function(event){
   const frame=$("gestionFrame");
-
-  // El visor PPTO es un iframe del mismo origen y puede solicitar
-  // volver a Gestión directamente al PPTO principal.
-  if(event.origin===location.origin && event.data?.type==="GT_VIEWER_BACK_TO_GESTION"){
-    volverGestionDesdePresupuesto();
-    return;
-  }
 
   if(!frame || event.source!==frame.contentWindow) return;
   // VER dentro de Gestión: abrimos el presupuesto en un iframe
@@ -2071,69 +2096,8 @@ document.addEventListener("keydown",function(event){
   if($("gestionBackdrop")?.classList.contains("open")) cerrarGestion();
 });
 
-// V12: el visor PPTO se abre en un iframe independiente.
-// La página principal conserva su sesión y su estado intactos.
-//
-// IMPORTANTE: si este documento está funcionando como visor, NO mostramos
-// el login inmediatamente. Esperamos primero la sesión enviada por el
-// PPTO principal. Esto evita la condición de carrera que hacía que el
-// primer VER pidiera usuario/PIN y los siguientes no.
-let gtViewerSessionTimer = null;
-
-function mostrarEsperaSesionVisor(){
-  $("app").innerHTML = `
-    <main class="wrap">
-      <section class="card login-card" style="text-align:center">
-        <img class="logo-login" src="${LOGO_URL}" alt="G&T S.R.L.">
-        <h1>Cargando presupuesto...</h1>
-        <div class="subtitle">Verificando la sesión actual.</div>
-        <div class="catalog-spinner" aria-label="Cargando"></div>
-      </section>
-    </main>`;
-}
-
-if(gtViewer){
-  if(token){
-    renderApp();
-  }else{
-    mostrarEsperaSesionVisor();
-    gtViewerSessionTimer=setTimeout(function(){
-      // Si después de la espera no llegó una sesión, recién entonces
-      // permitimos el login manual como respaldo.
-      if(!token) mostrarLogin();
-    }, 5000);
-  }
-}else{
-  if(token) renderApp(); else mostrarLogin();
-}
-
-window.addEventListener("message", function(event){
-  if(!gtViewer) return;
-  if(event.origin !== location.origin) return;
-  if(event.source !== window.parent) return;
-
-  const data=event.data || {};
-  if(data.type !== "GT_VIEWER_SESSION") return;
-  if(!data.token) return;
-
-  token=String(data.token);
-  vendedor=String(data.usuario || "");
-
-  try{ sessionStorage.setItem("gt_token", token); }catch(e){}
-  try{ if(vendedor) sessionStorage.setItem("gt_usuario", vendedor); }catch(e){}
-
-  if(gtViewerSessionTimer){
-    clearTimeout(gtViewerSessionTimer);
-    gtViewerSessionTimer=null;
-  }
-
-  if(verNumero){
-    renderLoadingHistorico();
-    cargarHistorico(verNumero);
-  }else{
-    renderApp();
-  }
-});
+// V13: el presupuesto se renderiza directamente en el PPTO principal.
+// No existe un segundo iframe PPTO ni una segunda sesión.
 </script>
 
 
@@ -2154,10 +2118,11 @@ window.addEventListener("message", function(event){
       <div class="presupuesto-ver-head">
         <strong>👁 VER PRESUPUESTO</strong>
         <div class="presupuesto-ver-actions">
+          <button type="button" class="btn btn-secondary" id="volverGestionPresupuesto">↩ VOLVER A GESTIÓN</button>
           <button type="button" class="presupuesto-ver-close" id="closePresupuestoVer" aria-label="Cerrar">×</button>
         </div>
       </div>
-      <iframe id="presupuestoVerFrame" title="Ver presupuesto" src="about:blank"></iframe>
+      <div id="presupuestoVerContenido" style="flex:1;overflow:auto;background:#f3f4f6"></div>
     </div>
   </div>
 
