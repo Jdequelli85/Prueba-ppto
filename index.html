@@ -445,7 +445,7 @@ th{font-size:12px;text-transform:uppercase;color:#666;background:#fafafa}
 
 
 /* =========================================================
-   PRUEBA 8 — PRESUPUESTO DENTRO DE PPTO
+   V11 — VISOR DE PRESUPUESTO DENTRO DE PPTO
    ========================================================= */
 .presupuesto-ver-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.62);z-index:9500;display:none;padding:18px}
 .presupuesto-ver-backdrop.open{display:flex;align-items:stretch;justify-content:center}
@@ -509,6 +509,7 @@ let catalogoProductos = [];
 let catalogoOpciones = [];
 let productoActual = null;
 let verNumero = new URLSearchParams(location.search).get("ver") || "";
+let gtViewer = new URLSearchParams(location.search).get("gt_viewer") === "1";
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
@@ -1884,7 +1885,13 @@ async function cargarHistorico(numero){
     const datos={cliente:p["Cliente"]||"",dniCuit:p["DNI/CUIT"]||"",telefono:p["Teléfono"]||"",email:p["Email"]||"",direccion:p["Dirección"]||"",formaPago:p["Forma de pago"]||"",total:Number(p["Total"]||0),productos:productosHistoricos};
     const fecha=p["Fecha"]?new Date(p["Fecha"]).toLocaleDateString("es-AR"):new Date().toLocaleDateString("es-AR");
     $("app").innerHTML=header()+`<main class="wrap"><div class="historical-actions no-print"><button class="btn btn-secondary" id="returnGestion">↩ VOLVER A GESTIÓN</button><button class="btn btn-primary" id="printQuote">🖨 IMPRIMIR / GUARDAR PDF</button><button class="btn btn-secondary" id="newQuote">NUEVO PRESUPUESTO</button></div>${quoteHtml(numero,fecha,datos)}</main>`;
-    $("returnGestion").onclick=()=>abrirGestion();
+    $("returnGestion").onclick=()=>{
+      if(gtViewer && window.parent !== window){
+        window.parent.postMessage({type:"GT_VIEWER_BACK_TO_GESTION"}, location.origin);
+      }else{
+        abrirGestion();
+      }
+    };
     $("printQuote").onclick=()=>window.print();$("newQuote").onclick=nuevoPresupuesto;
   }catch(e){
     $("app").innerHTML=header()+`<main class="wrap"><section class="card"><div class="status error" style="display:block">${esc(e.message)}</div><div class="actions no-print"><button class="btn btn-secondary" id="back">VOLVER</button></div></section></main>`;
@@ -1959,37 +1966,55 @@ function cerrarGestion(){
 function abrirPresupuestoEnVentana(numero){
   if(!numero || !token) return;
 
-  // V10: NO abrimos otro PPTO dentro de un iframe.
-  // El presupuesto se carga directamente en ESTA misma aplicación,
-  // usando el token que ya tiene la sesión principal.
-  // De esta manera no existe un segundo login ni una segunda sesión.
+  const frame=$("presupuestoVerFrame");
+  const backdrop=$("presupuestoVerBackdrop");
+  if(!frame || !backdrop) return;
+
   cerrarGestion();
-  verNumero=String(numero).trim();
-  renderLoadingHistorico();
-  cargarHistorico(verNumero);
+
+  const hash = "#gt_session=" + encodeURIComponent(token) +
+               "&gt_usuario=" + encodeURIComponent(vendedor);
+
+  const url = "https://ppto.gytsrl.com/?ver=" +
+              encodeURIComponent(String(numero).trim()) +
+              "&gt_viewer=1" + hash;
+
+  frame.src = url;
+  backdrop.classList.add("open");
 }
 
 function cerrarPresupuestoEnVentana(){
-  // Se conserva la función por compatibilidad con los controles
-  // existentes de versiones anteriores. En V10 no hay iframe de visor.
+  const backdrop=$("presupuestoVerBackdrop");
+  const frame=$("presupuestoVerFrame");
+  if(backdrop) backdrop.classList.remove("open");
+  if(frame) frame.src="about:blank";
 }
 
 function volverGestionDesdePresupuesto(){
+  cerrarPresupuestoEnVentana();
   abrirGestion();
 }
 
 window.addEventListener("message",function(event){
   const frame=$("gestionFrame");
+
+  // El visor PPTO es un iframe del mismo origen y puede solicitar
+  // volver a Gestión directamente al PPTO principal.
+  if(event.origin===location.origin && event.data?.type==="GT_VIEWER_BACK_TO_GESTION"){
+    volverGestionDesdePresupuesto();
+    return;
+  }
+
   if(!frame || event.source!==frame.contentWindow) return;
   // VER dentro de Gestión: abrimos el presupuesto en un iframe
-  // dentro de PPTO. No navegamos ni recargamos la página principal.
+  // independiente. La página principal de PPTO queda intacta.
   if(event.origin===GESTION_ORIGIN && event.data?.type==="GT_VER_PRESUPUESTO"){
     const numero=String(event.data.numero||"").trim();
     if(!numero || !token) return;
-    cerrarGestion();
     abrirPresupuestoEnVentana(numero);
     return;
   }
+
   if(event.data?.type!=="GT_GESTION_READY") return;
 
   // El Histórico nos avisa cuando ya está listo para recibir la sesión.
@@ -2020,15 +2045,14 @@ document.addEventListener("keydown",function(event){
   if($("gestionBackdrop")?.classList.contains("open")) cerrarGestion();
 });
 
-// V10: no existe un visor PPTO secundario.
-// El evento GT_VER_PRESUPUESTO se resuelve directamente
-// en la ventana principal mediante abrirPresupuestoEnVentana().
+// V11: el visor PPTO se abre en un iframe independiente.
+// La página principal conserva su sesión y su estado intactos.
 
 if(token) renderApp(); else mostrarLogin();
 </script>
 
 
-  <!-- V10: Gestión integrada -->
+  <!-- V11: Gestión integrada -->
   <div class="gestion-backdrop" id="gestionBackdrop">
     <div class="gestion-modal" role="dialog" aria-modal="true" aria-label="Gestión de presupuestos">
       <div class="gestion-modal-head">
@@ -2036,6 +2060,19 @@ if(token) renderApp(); else mostrarLogin();
         <button type="button" class="gestion-close" id="closeGestion" aria-label="Cerrar">×</button>
       </div>
       <iframe id="gestionFrame" title="Gestión de presupuestos" src="about:blank"></iframe>
+    </div>
+  </div>
+
+  <!-- V11: visor de presupuesto integrado -->
+  <div class="presupuesto-ver-backdrop" id="presupuestoVerBackdrop">
+    <div class="presupuesto-ver-modal" role="dialog" aria-modal="true" aria-label="Ver presupuesto">
+      <div class="presupuesto-ver-head">
+        <strong>👁 VER PRESUPUESTO</strong>
+        <div class="presupuesto-ver-actions">
+          <button type="button" class="presupuesto-ver-close" id="closePresupuestoVer" aria-label="Cerrar">×</button>
+        </div>
+      </div>
+      <iframe id="presupuestoVerFrame" title="Ver presupuesto" src="about:blank"></iframe>
     </div>
   </div>
 
