@@ -4909,10 +4909,11 @@ const body =
       const telefono = escaparHTML(item && item.telefono || "—");
       const direccion = escaparHTML(obtenerDireccionResumen(item, detalle));
 
-      const estado = obtenerTextoEstadoEntregaResumen(
-        detalle && detalle.estado || item && item.entregaEstado || "Pendiente"
-      );
-      const claseEstado = obtenerClaseEstadoEntregaResumen(estado);
+      // En este resumen mostramos el estado del PAGO, que es el dato
+      // administrativo más importante para la entrega.
+      const estadoVisualPago = obtenerEstadoVisual(item);
+      const estado = obtenerTextoEstadoVisual(item);
+      const claseEstado = estadoVisualPago;
 
       const productos = obtenerProductosResumenEntrega(detalle);
 
@@ -4925,11 +4926,13 @@ const body =
         const filas = productos.map(function(p) {
           const nombre = escaparHTML(p.producto || p.nombre || p.id || "Producto");
           const unidad = String(p.unidad || "").trim();
-          const realizado = Number(p.realizado || 0);
+          // Para el resumen del calendario mostramos la cantidad TOTAL
+          // comprada/presupuestada, no la cantidad ya entregada.
+          const totalComprado = Number(p.comprado || 0);
 
           return '<tr>' +
             '<td>' + nombre + (unidad ? ' <span class="delivery-unit">(' + escaparHTML(unidad) + ')</span>' : '') + '</td>' +
-            '<td>' + escaparHTML(formatearCantidadEntrega(realizado)) + (unidad ? ' ' + escaparHTML(unidad) : '') + '</td>' +
+            '<td>' + escaparHTML(formatearCantidadEntrega(totalComprado)) + (unidad ? ' ' + escaparHTML(unidad) : '') + '</td>' +
           '</tr>';
         }).join("");
 
@@ -5274,7 +5277,7 @@ const body =
       const titulo = document.getElementById("deliveryQuestionTitle");
       if (titulo) {
         titulo.textContent = conFlete
-          ? "¿Se entrega toda la mercadería en este envío?"
+          ? "¿Se realizó el flete de toda la mercadería?"
           : "¿El cliente retiró toda la mercadería?";
       }
     }
